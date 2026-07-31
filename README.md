@@ -1,75 +1,102 @@
-# HUG Lagos/Ibadan Terraform Challenge — Week One Project 1
+# HUG Lagos/Ibadan Terraform Challenge - Week Two Project 2
 
-Deploys a basic web server on AWS using Terraform: a custom VPC, public subnet,
-Internet Gateway, route table, security group (SSH + HTTP), and an EC2 instance
-running Nginx that serves a simple HTML page.
+Refactors Week One's infrastructure into reusable Terraform modules, and
+stores Terraform state remotely in an S3 bucket with DynamoDB state locking.
+
+## Project structure
+
+
+terraform-modules-project/
+├── modules/
+│   ├── vpc/                # Creates the VPC
+│   ├── networking/         # Subnet, Internet Gateway, route table
+│   ├── security_group/     # Security group (SSH + HTTP)
+│   └── compute/            # EC2 instance + Nginx user_data script
+├── provider.tf             # AWS provider configuration
+├── backend.tf              # Remote backend (S3 + DynamoDB)
+├── variables.tf            # Root input variables
+├── main.tf                 # Calls all four modules
+├── outputs.tf               # Root outputs (public IP, website URL, VPC ID)
+└── README.md
+
 
 ## Prerequisites
 
 - Terraform installed (v1.5+)
-- AWS CLI installed and configured with credentials (aws configure)
-- An existing EC2 key pair in your target region (optional, only needed if you
-  want SSH access — leave key_name blank in variables if not needed)
+- AWS CLI installed and configured (`aws configure`)
+- An AWS account with permissions to create S3 buckets, DynamoDB tables, VPCs, EC2 instances, and security groups
 
-## Files
+## Step 1 — One-time remote backend setup
 
-- provider.tf — AWS provider configuration
-- variables.tf — input variables (region, CIDR blocks, instance type, your name)
-- network.tf — VPC, public subnet, Internet Gateway, route table
-- security_group.tf — security group allowing SSH (22) and HTTP (80)
-- main.tf — EC2 instance + user_data script that installs and configures Nginx
-- outputs.tf — outputs the instance's public IP and website URL
+Terraform's S3 backend cannot create its own bucket/table - these must exist
+*before* running `terraform init`. Run this once, from any terminal with
+AWS CLI configured:
 
-## Deployment Steps
+```bash
+# Create the S3 bucket for state storage (must be globally unique - edit the name)
+# Note: us-east-1 does NOT use --create-bucket-configuration
+aws s3api create-bucket \
+  --bucket hug-terraform-state-sanddee-2026 \
+  --region us-east-1 
 
-1. Clone this repo and cd into it:
-   bash
-   git clone <your-repo-url>
-   cd terraformHUG
-   
+# Enable versioning (protects against accidental state corruption/loss)
+aws s3api put-bucket-versioning \
+  --bucket hug-terraform-state-sanddee-2026 \
+  --versioning-configuration Status=Enabled
 
-2. (Optional) Edit variables.tf to set your full name and preferred region:
-   hcl
-   variable "full_name" {
-     default = "Your Full Name"
-   }
-   
-   Or override at apply time (see step 5).
+# Create the DynamoDB table for state locking (prevents concurrent applies)
+aws dynamodb create-table \
+  --table-name hug-terraform-locks \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region us-east-1
 
-3. Initialize Terraform (downloads the AWS provider):
-   bash
-   terraform init
-   
 
-4. Preview the plan:
-   bash
-   terraform plan
-   
+If you change the bucket name or region, update backend.tf to match exactly.
 
-5. Apply (deploys the infrastructure):
-   bash
-   terraform apply -var="full_name=Your Full Name"
-   
-   Type yes when prompted.
+## Step 2 — Deploy the infrastructure
 
-6. Once complete, Terraform prints the website_url output. Wait ~1 minute for
-   the instance to finish booting and installing Nginx, then open that URL in
-   your browser.
+bash
+terraform init      # downloads providers AND connects to the S3 backend
+terraform plan
+terraform apply      # type 'yes' when prompted
 
-7. Take your screenshots:
-   - The webpage showing your name and "HUG Lagos/Ibadan Terraform Challenge"
-   - The AWS EC2 console showing the instance in a "Running" state
 
-8. When done, tear down the infrastructure to avoid ongoing charges:
-   bash
-   terraform destroy
-   
-   Type yes when prompted.
+terraform init will detect the backend block and configure remote state
+automatically. You can confirm state is stored remotely (not locally) by
+checking that no terraform.tfstate file appears in your project folder —
+instead, check the S3 bucket via the AWS console or:
+bash
+aws s3 ls s3://hug-terraform-state-sanddee-2026/week2/
 
-## Notes
 
-- Uses the latest Amazon Linux 2 AMI automatically (via a data source), so no
-  AMI ID needs to be hardcoded.
-- t2.micro is used by default, which is Free Tier eligible.
-- The security group opens SSH and HTTP to 0.0.0.0/0 for simplicity — in a
-  real production setup, SSH access should be restricted to a specific IP.
+## Step 3 — Verify
+
+Once applied, Terraform prints website_url. Open it in your browser —
+you should see your name and "HUG Lagos/Ibadan Terraform Challenge".
+
+Take your screenshots:
+- The webpage
+- AWS Console → EC2 → Instances (showing it running)
+
+## Step 4 — Tear down
+
+bash
+terraform destroy
+
+
+The S3 bucket and DynamoDB table used for the backend are NOT destroyed by
+this command (they're managed outside Terraform) — delete them manually via
+the console or CLI if you want to remove them entirely.
+
+## Notes on modules
+
+- Each module is self-contained with its own variables.tf (inputs) and
+  outputs.tf (values passed to other modules or the root config).
+- The root main.tf wires modules together by passing one module's output
+  as another's input — e.g., module.vpc.vpc_id is passed into both the
+  networking and security_group modules.
+- This structure means each module (vpc, networking, security_group,
+  compute) could be reused in another project by just changing the input
+  variables — no need to rewrite the underlying resource logic.

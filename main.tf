@@ -1,42 +1,25 @@
-# Get latest Amazon Linux 2 AMI
-data "aws_ami" "amazon_linux" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
-  }
+module "vpc" {
+  source = "./modules/vpc"
+  vpc_cidr = var.vpc_cidr
+  vpc_name = "${var.name_prefix}-vpc"
 }
-
-resource "aws_instance" "web" {
-  ami                         = data.aws_ami.amazon_linux.id
-  instance_type               = var.instance_type
-  subnet_id                   = aws_subnet.public.id
-  vpc_security_group_ids      = [aws_security_group.web_sg.id]
-  associate_public_ip_address = true
-  key_name                    = var.key_name != "" ? var.key_name : null
-
-  user_data = <<-EOF
-              #!/bin/bash
-              yum update -y
-              amazon-linux-extras install nginx1 -y
-              systemctl enable nginx
-              systemctl start nginx
-              cat <<'HTML' > /usr/share/nginx/html/index.html
-              <!DOCTYPE html>
-              <html>
-              <head><title>HUG Terraform Challenge</title></head>
-              <body style="font-family: Arial, sans-serif; text-align: center; margin-top: 100px;">
-                <h1>${var.full_name}</h1>
-                <h2>HUG Lagos/Ibadan Terraform Challenge</h2>
-              </body>
-              </html>
-              HTML
-              systemctl restart nginx
-              EOF
-
-  tags = {
-    Name = "hug-terraform-web-server"
-  }
+module "networking" {
+  source = "./modules/networking"
+  vpc_id = module.vpc.vpc_id
+  public_subnet_cidr = var.public_subnet_cidr
+  name_prefix = var.name_prefix
+}
+module "security_group" {
+  source = "./modules/security_group"
+  vpc_id = module.vpc.vpc_id
+  name_prefix = var.name_prefix
+}
+module "compute" {
+  source = "./modules/compute"
+  subnet_id = module.networking.public_subnet_id
+  security_group_id = module.security_group.security_group_id
+  instance_type = var.instance_type
+  full_name = var.full_name
+  key_name = var.key_name
+  name_prefix = var.name_prefix
 }

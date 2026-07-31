@@ -1,14 +1,14 @@
 output "instance_public_ip" {
   description = "Public IP address of the web server"
-  value       = aws_instance.web.public_ip
+  value = module.compute.public_ip
 }
 
 output "website_url" {
   description = "URL to view the webpage"
-  value       = "http://${aws_instance.web.public_ip}"
+  value = "http://${module.compute.public_ip}"
 }
 
-output "instance_id" {
-  description = "ID of the EC2 instance"
-  value       = aws_instance.web.id
+output "vpc_id" {
+  description = "ID of the created VPC"
+  value = module.vpc.vpc_id
 }
